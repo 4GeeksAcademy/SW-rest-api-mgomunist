@@ -2,15 +2,22 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flasgger import Swagger
+from flask_migrate import Migrate
 import datetime
 
-# Inicializar Flask, base de datos y JWT
 app = Flask(__name__)
+
+# Configuración de la base de datos
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite3'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  
 app.config['SECRET_KEY'] = 'your-secret-key'
+
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 swagger = Swagger(app)
+
+# Inicializar Flask-Migrate
+migrate = Migrate(app, db)
 
 # Modelos
 class User(db.Model):
@@ -93,4 +100,3 @@ def resource_not_found(e):
 
 if __name__ == '__main__':
     app.run(debug=True)
-
