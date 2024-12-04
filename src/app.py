@@ -1,51 +1,96 @@
-"""
-This module takes care of starting the API Server, Loading the DB and Adding the endpoints
-"""
-import os
-from flask import Flask, request, jsonify, url_for
-from flask_migrate import Migrate
-from flask_swagger import swagger
-from flask_cors import CORS
-from utils import APIException, generate_sitemap
-from admin import setup_admin
-from models import db, User
-#from models import Person
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flasgger import Swagger
+import datetime
 
+# Inicializar Flask, base de datos y JWT
 app = Flask(__name__)
-app.url_map.strict_slashes = False
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite3'
+app.config['SECRET_KEY'] = 'your-secret-key'
+db = SQLAlchemy(app)
+jwt = JWTManager(app)
+swagger = Swagger(app)
 
-db_url = os.getenv("DATABASE_URL")
-if db_url is not None:
-    app.config['SQLALCHEMY_DATABASE_URI'] = db_url.replace("postgres://", "postgresql://")
-else:
-    app.config['SQLALCHEMY_DATABASE_URI'] = "sqlite:////tmp/test.db"
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Modelos
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=False)
 
-MIGRATE = Migrate(app, db)
-db.init_app(app)
-CORS(app)
-setup_admin(app)
+class Character(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    species = db.Column(db.String(100), nullable=False)
 
-# Handle/serialize errors like a JSON object
-@app.errorhandler(APIException)
-def handle_invalid_usage(error):
-    return jsonify(error.to_dict()), error.status_code
+class Favorite(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    favorite_type = db.Column(db.String(50), nullable=False)  # 'planet' o 'character'
+    item_id = db.Column(db.Integer, nullable=False)
 
-# generate sitemap with all your endpoints
-@app.route('/')
-def sitemap():
-    return generate_sitemap(app)
+# Rutas
 
-@app.route('/user', methods=['GET'])
-def handle_hello():
+# Ruta de login para obtener el token JWT
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.get_json()
+    email = data.get('email')
+    password = data.get('password')
 
-    response_body = {
-        "msg": "Hello, this is your GET /user response "
-    }
+    if not email or not password:
+        return jsonify({"message": "Email and password are required"}), 400
 
-    return jsonify(response_body), 200
+    user = User.query.filter_by(email=email).first()
 
-# this only runs if `$ python src/app.py` is executed
+    if not user or user.password != password:
+        return jsonify({"message": "Invalid credentials"}), 401
+
+    access_token = create_access_token(identity=user.id, expires_delta=datetime.timedelta(hours=1))
+    return jsonify({'token': access_token}), 200
+
+# CRUD de personajes
+@app.route('/characters', methods=['POST'])
+@jwt_required()
+def add_character():
+    data = request.get_json()
+    if 'name' not in data or 'species' not in data:
+        return jsonify({"error": "Missing required fields"}), 400
+    new_character = Character(name=data['name'], species=data['species'])
+    db.session.add(new_character)
+    db.session.commit()
+    return jsonify({"message": "Character added successfully"}), 201
+
+@app.route('/characters/<int:id>', methods=['GET'])
+@jwt_required()
+def get_character(id):
+    character = Character.query.get(id)
+    if not character:
+        return jsonify({"message": "Character not found"}), 404
+    return jsonify({'id': character.id, 'name': character.name, 'species': character.species}), 200
+
+# CRUD de favoritos
+@app.route('/favorites', methods=['POST'])
+@jwt_required()
+def add_favorite():
+    data = request.get_json()
+    favorite = Favorite(user_id=data['user_id'], favorite_type=data['favorite_type'], item_id=data['item_id'])
+    db.session.add(favorite)
+    db.session.commit()
+    return jsonify({"message": "Favorite added successfully"}), 201
+
+@app.route('/favorites', methods=['GET'])
+@jwt_required()
+def get_favorites():
+    current_user_id = get_jwt_identity()
+    favorites = Favorite.query.filter_by(user_id=current_user_id).all()
+    return jsonify([{'favorite_type': f.favorite_type, 'item_id': f.item_id} for f in favorites]), 200
+
+# Manejo de errores
+@app.errorhandler(404)
+def resource_not_found(e):
+    return jsonify(error=str(e)), 404
+
 if __name__ == '__main__':
-    PORT = int(os.environ.get('PORT', 3000))
-    app.run(host='0.0.0.0', port=PORT, debug=False)
+    app.run(debug=True)
+
