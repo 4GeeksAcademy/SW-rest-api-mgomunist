@@ -1,10 +1,13 @@
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request, jsonify, url_for
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from flasgger import Swagger
 from flask_migrate import Migrate
-import datetime
+from flask_cors import CORS
 from admin import setup_admin
+from utils import APIException, generate_sitemap
+import datetime
 
 app = Flask(__name__)
 
@@ -13,14 +16,13 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///db.sqlite3'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  
 app.config['SECRET_KEY'] = 'your-secret-key'
 
+# Inicializar extensiones
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
 swagger = Swagger(app)
-
-# Inicializar Flask-Migrate
 migrate = Migrate(app, db)
-
-setup_admin(app)  # Llamamos a la función que configura el admin
+CORS(app)
+setup_admin(app)  # Configuración del admin
 
 # Modelos
 class User(db.Model):
@@ -38,6 +40,16 @@ class Favorite(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     favorite_type = db.Column(db.String(50), nullable=False)  # 'planet' o 'character'
     item_id = db.Column(db.Integer, nullable=False)
+
+# Manejo de errores personalizado con APIException
+@app.errorhandler(APIException)
+def handle_invalid_usage(error):
+    return jsonify(error.to_dict()), error.status_code
+
+# Generación dinámica de sitemap
+@app.route('/')
+def sitemap():
+    return generate_sitemap(app)
 
 # Rutas
 
@@ -96,7 +108,7 @@ def get_favorites():
     favorites = Favorite.query.filter_by(user_id=current_user_id).all()
     return jsonify([{'favorite_type': f.favorite_type, 'item_id': f.item_id} for f in favorites]), 200
 
-# Manejo de errores
+# Manejo de errores 404
 @app.errorhandler(404)
 def resource_not_found(e):
     return jsonify(error=str(e)), 404
