@@ -4,6 +4,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flasgger import Swagger
 from flask_migrate import Migrate
 import datetime
+from admin import setup_admin
 
 app = Flask(__name__)
 
@@ -18,6 +19,8 @@ swagger = Swagger(app)
 
 # Inicializar Flask-Migrate
 migrate = Migrate(app, db)
+
+setup_admin(app)  # Llamamos a la función que configura el admin
 
 # Modelos
 class User(db.Model):
